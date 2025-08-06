@@ -2,41 +2,67 @@ import socket
 import threading
 import logging
 import time
+import uuid
 
 logging.basicConfig(filename='klein_tesla_trap.log', level=logging.INFO, format='%(asctime)s %(message)s')
 
 trap_ports = [445, 135, 139, 3389]
+MAX_RECURSION_DEPTH = 5  # Prevent infinite system exhaustion
 
-def loopback_connection(port):
-	# Tesla valve: Only allow loopback (localhost) connections, block all others
+def loopback_connection(port, depth, parent_id):
 	try:
-		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		# Only connect to localhost — no outside connections allowed
-		s.connect(('127.0.0.1', port))
-		logging.info(f"Loopback connection successful on port {port}")
-		s.close()
+		logging.info(f"[{parent_id}] Recursion depth {depth} on port {port}")
+		
+		if depth > MAX_RECURSION_DEPTH:
+			logging.info(f"[{parent_id}] Max recursion depth reached. Stopping recursion on port {port}.")
+			return
+
+		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+			s.connect(('127.0.0.1', port))
+			logging.info(f"[{parent_id}] Loopback connection successful on port {port} at depth {depth}")
+
+			# Optional: Delay to simulate Klein bottle folding time
+			time.sleep(0.5)
+
+			# Recursively create new loopback connection
+			threading.Thread(
+				target=loopback_connection,
+				args=(port, depth + 1, parent_id),
+				daemon=True
+			).start()
+
 	except Exception as e:
-		logging.info(f"Loopback connection failed on port {port}: {e}")
+		logging.info(f"[{parent_id}] Loopback connection failed on port {port} at depth {depth}: {e}")
 
 def trap_port(port):
 	server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	server.bind(('0.0.0.0', port))
-	server.listen(5)
-	logging.info(f"Klein-Tesla honeypot listening on port {port}")
-	print(f"Klein-Tesla honeypot listening on port {port}")
+	try:
+		server.bind(('0.0.0.0', port))
+		server.listen(5)
+		logging.info(f"Klein-Tesla honeypot listening on port {port}")
+		print(f"Klein-Tesla honeypot listening on port {port}")
 
-	while True:
-		client, addr = server.accept()
-		logging.info(f"Incoming connection from {addr} on port {port}")
+		while True:
+			client, addr = server.accept()
+			parent_id = str(uuid.uuid4())[:8]  # Unique ID per connection
 
-		# Here is the Tesla valve effect:
-		# Accept inbound connections, but do NOT initiate connections outward to any external IP.
-		# Only initiate internal loopbacks to trap worm traffic in the Klein bottle loop.
-		threading.Thread(target=loopback_connection, args=(port,), daemon=True).start()
+			logging.info(f"[{parent_id}] Incoming connection from {addr} on port {port}")
 
-		# Immediately close client connection to simulate trapping the worm
-		client.close()
+			# Launch loopback thread to simulate Tesla valve
+			threading.Thread(
+				target=loopback_connection,
+				args=(port, 1, parent_id),
+				daemon=True
+			).start()
+
+			# Close client immediately to simulate trapping the worm
+			client.close()
+
+	except Exception as e:
+		logging.error(f"Failed to start honeypot on port {port}: {e}")
+	finally:
+		server.close()
 
 def main():
 	threads = []
